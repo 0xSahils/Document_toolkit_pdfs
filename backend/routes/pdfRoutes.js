@@ -453,6 +453,15 @@ router.post("/convert", uploadSingle, async (req, res) => {
     });
   } catch (error) {
     console.error("Convert error:", error);
+    console.error("Error stack:", error.stack);
+
+    // Log more details for debugging
+    console.error("Environment info:", {
+      nodeVersion: process.version,
+      platform: process.platform,
+      arch: process.arch,
+      env: process.env.NODE_ENV,
+    });
 
     if (operation && PdfOperation.db && PdfOperation.db.readyState === 1) {
       operation.status = "failed";
@@ -462,10 +471,37 @@ router.post("/convert", uploadSingle, async (req, res) => {
 
     FileManager.cleanupFiles(filesToCleanup);
 
+    // Provide more detailed error information
+    let errorMessage = "Failed to convert PDF";
+    let errorDetails = error.message;
+
+    if (error.message.includes("Canvas")) {
+      errorMessage = "PDF conversion failed due to missing system dependencies";
+      errorDetails =
+        "The server environment is missing required graphics libraries. Please contact support.";
+    } else if (error.message.includes("pdf2pic")) {
+      errorMessage = "PDF conversion service temporarily unavailable";
+      errorDetails =
+        "The PDF to image conversion service is experiencing issues. Please try again later.";
+    } else if (
+      error.message.includes("All PDF to image conversion methods failed")
+    ) {
+      errorMessage = "PDF conversion not supported in current environment";
+      errorDetails =
+        "The server cannot process PDF to image conversion at this time. Please try a different operation.";
+    }
+
     res.status(500).json({
       success: false,
-      message: "Failed to convert PDF",
-      error: error.message,
+      message: errorMessage,
+      error: errorDetails,
+      debug:
+        process.env.NODE_ENV === "development"
+          ? {
+              originalError: error.message,
+              stack: error.stack,
+            }
+          : undefined,
     });
   }
 });
@@ -575,6 +611,75 @@ router.get("/history", async (req, res) => {
     res.status(500).json({
       success: false,
       message: "Failed to get history",
+      error: error.message,
+    });
+  }
+});
+
+// Health check endpoint for PDF conversion capabilities
+router.get("/health", async (req, res) => {
+  try {
+    const healthStatus = {
+      server: "healthy",
+      timestamp: new Date().toISOString(),
+      environment: {
+        nodeVersion: process.version,
+        platform: process.platform,
+        arch: process.arch,
+        env: process.env.NODE_ENV,
+      },
+      dependencies: {},
+    };
+
+    // Check pdf2pic availability
+    try {
+      require("pdf2pic");
+      healthStatus.dependencies.pdf2pic = "available";
+    } catch (error) {
+      healthStatus.dependencies.pdf2pic = "unavailable";
+    }
+
+    // Check pdf-poppler availability
+    try {
+      require("pdf-poppler");
+      healthStatus.dependencies.pdfPoppler = "available";
+    } catch (error) {
+      healthStatus.dependencies.pdfPoppler = "unavailable";
+    }
+
+    // Check canvas availability
+    try {
+      require("canvas");
+      healthStatus.dependencies.canvas = "available";
+    } catch (error) {
+      healthStatus.dependencies.canvas = "unavailable";
+    }
+
+    // Check pdfjs-dist availability
+    try {
+      require("pdfjs-dist/legacy/build/pdf.js");
+      healthStatus.dependencies.pdfjs = "available";
+    } catch (error) {
+      healthStatus.dependencies.pdfjs = "unavailable";
+    }
+
+    // Check database connection
+    if (PdfOperation.db && PdfOperation.db.readyState === 1) {
+      healthStatus.database = "connected";
+    } else {
+      healthStatus.database = "disconnected";
+    }
+
+    res.json({
+      success: true,
+      message: "Health check completed",
+      data: healthStatus,
+    });
+  } catch (error) {
+    console.error("Health check error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Health check failed",
       error: error.message,
     });
   }

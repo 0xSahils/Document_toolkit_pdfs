@@ -141,10 +141,102 @@ class PDFProcessor {
 
   static async convertPDFToImages(inputPath, outputDir, format = "png") {
     try {
-      // Use PDF.js with Canvas for reliable conversion
-      return await this.pdfJsImageConversion(inputPath, outputDir, format);
+      // Try multiple conversion methods for better deployment compatibility
+      console.log("Starting PDF to image conversion...");
+
+      // Method 1: Try pdf2pic (most reliable for deployments)
+      try {
+        return await this.pdf2picConversion(inputPath, outputDir, format);
+      } catch (pdf2picError) {
+        console.log(
+          "pdf2pic failed, trying alternative method:",
+          pdf2picError.message
+        );
+      }
+
+      // Method 2: Try PDF.js with Canvas (fallback)
+      try {
+        return await this.pdfJsImageConversion(inputPath, outputDir, format);
+      } catch (pdfJsError) {
+        console.log("PDF.js conversion failed:", pdfJsError.message);
+      }
+
+      // Method 3: Try pdf-poppler (another fallback)
+      try {
+        return await this.pdfPopplerConversion(inputPath, outputDir, format);
+      } catch (popplerError) {
+        console.log("pdf-poppler failed:", popplerError.message);
+      }
+
+      throw new Error("All PDF to image conversion methods failed");
     } catch (error) {
+      console.error("PDF to image conversion error:", error.message);
       throw new Error(`PDF to image conversion failed: ${error.message}`);
+    }
+  }
+
+  static async pdf2picConversion(inputPath, outputDir, format = "png") {
+    try {
+      const pdf2pic = require("pdf2pic");
+
+      const options = {
+        density: 150, // Output resolution
+        saveFilename: "page", // Output filename
+        savePath: outputDir, // Output directory
+        format: format.toLowerCase() === "jpg" ? "jpeg" : format.toLowerCase(),
+        width: 2000, // Max width
+        height: 2000, // Max height
+        quality: 80, // JPEG quality
+      };
+
+      console.log("Using pdf2pic for conversion with options:", options);
+
+      const convert = pdf2pic.fromPath(inputPath, options);
+      const results = await convert.bulk(-1); // Convert all pages
+
+      const outputPaths = results.map((result) => result.path);
+
+      if (outputPaths.length === 0) {
+        throw new Error("No pages were converted");
+      }
+
+      console.log(
+        `Successfully converted ${outputPaths.length} pages using pdf2pic`
+      );
+      return outputPaths;
+    } catch (error) {
+      console.error("pdf2pic conversion error:", error.message);
+      throw new Error(`pdf2pic conversion failed: ${error.message}`);
+    }
+  }
+
+  static async pdfPopplerConversion(inputPath, outputDir, format = "png") {
+    try {
+      const pdf = require("pdf-poppler");
+
+      const options = {
+        format: format.toLowerCase() === "jpg" ? "jpeg" : format.toLowerCase(),
+        out_dir: outputDir,
+        out_prefix: "page",
+        page: null, // Convert all pages
+        scale: 2048, // High resolution
+      };
+
+      console.log("Using pdf-poppler for conversion");
+
+      const results = await pdf.convert(inputPath, options);
+
+      if (!results || results.length === 0) {
+        throw new Error("No pages were converted");
+      }
+
+      console.log(
+        `Successfully converted ${results.length} pages using pdf-poppler`
+      );
+      return results;
+    } catch (error) {
+      console.error("pdf-poppler conversion error:", error.message);
+      throw new Error(`pdf-poppler conversion failed: ${error.message}`);
     }
   }
 
@@ -152,11 +244,22 @@ class PDFProcessor {
     try {
       // Use legacy build for Node.js
       const pdfjsLib = require("pdfjs-dist/legacy/build/pdf.js");
-      const { createCanvas } = require("canvas");
+
+      // Check if canvas is available
+      let createCanvas;
+      try {
+        createCanvas = require("canvas").createCanvas;
+      } catch (canvasError) {
+        throw new Error("Canvas package not available in this environment");
+      }
 
       // Set up PDF.js worker for Node.js environment
       if (typeof global !== "undefined") {
-        global.DOMMatrix = require("dommatrix");
+        try {
+          global.DOMMatrix = require("dommatrix");
+        } catch (domError) {
+          console.log("DOMMatrix not available, continuing without it");
+        }
       }
 
       // Read PDF file
@@ -218,6 +321,9 @@ class PDFProcessor {
         throw new Error("No pages could be converted to images");
       }
 
+      console.log(
+        `Successfully converted ${results.length} pages using PDF.js`
+      );
       return results;
     } catch (error) {
       console.error("PDF.js conversion error:", error.message);

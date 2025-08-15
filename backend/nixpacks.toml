@@ -1,0 +1,23 @@
+[phases.setup]
+nixPkgs = [
+  "nodejs_18",
+  "python3",
+  "pkg-config",
+  "pixman",
+  "cairo",
+  "pango",
+  "libjpeg",
+  "giflib",
+  "librsvg",
+  "poppler_utils",
+  "imagemagick"
+]
+
+[phases.install]
+cmds = ["npm ci"]
+
+[phases.build]
+cmds = ["npm run build --if-present"]
+
+[start]
+cmd = "npm start"
